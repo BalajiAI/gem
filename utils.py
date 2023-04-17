@@ -150,18 +150,6 @@ def parse_intrinsics(filepath, trgt_sidelength=None, invert_y=False):
     return full_intrinsic, grid_barycenter, scale, world2cam_poses
 
 
-def load_pose(filename):
-    lines = open(filename).read().splitlines()
-    if len(lines) == 1:
-        pose = np.zeros((4, 4), dtype=np.float32)
-        for i in range(16):
-            pose[i // 4, i % 4] = lines[0].split(" ")[i]
-        return pose.squeeze()
-    else:
-        lines = [[x[0], x[1], x[2], x[3]] for x in (x.split(" ") for x in lines[:4])]
-        return np.asarray(lines).astype(np.float32).squeeze()
-
-
 def square_crop_img(img):
     min_dim = np.amin(img.shape[:2])
     center_coord = np.array(img.shape[:2]) // 2
@@ -201,47 +189,3 @@ def dict_to_gpu(ob):
         return {k: dict_to_gpu(v) for k, v in ob.items()}
     else:
         return ob.cuda()
-
-def stitch_audio_subset(audio_samples, num_sample=10, elmts=None):
-    # concatenate arrays of audio samples
-    # audio samples = [B, 1, T] where B = batch size, T = len of sample
-    # only sample k from batch of samples
-    # if elmts is not None, use the pre-sampled samples in batch
-    # returns concatenated signals and sampled set of indices
-
-    if num_sample == -1: # use all
-        elmts = list(range(len(audio_samples)))
-    elif elmts is None:
-        # sample indices
-        batch_size = audio_samples.shape[0]
-        if num_sample > batch_size: num_sample = batch_size
-        elmts = random.sample(range(batch_size), num_sample)
-
-    audio_subset = []
-    for elmt in elmts:
-        audio_subset.append(audio_samples[elmt])
-
-    combo_signal = torch.cat(audio_subset, dim=-1)
-    return combo_signal, elmts
-
-
-def process_tf_record_data(data_path):
-    # reads in TFRecord data
-    # returns list of data features (dicts)
-    import tensorflow as tf # adding this here to not break other envs
-
-    # help from: https://www.tensorflow.org/tutorials/load_data/tfrecord
-    import pdb
-    pdb.set_trace()
-    raw_dataset = [raw_record for raw_record in tf.data.TFRecordDataset(data_path)]#.take(1)]
-    data_features = []
-    for raw_record in raw_dataset:
-        example = tf.train.Example()
-        example.ParseFromString(raw_record.numpy())
-        data_features.append(example.features.feature)
-
-    return data_features
-
-def convert_byte2str(str_data):
-    # extract string data from compressed rep
-    return [x.decode('utf-8') for x in str_data.bytes_list.value][0]
