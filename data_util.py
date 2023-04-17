@@ -25,34 +25,6 @@ def load_rgb(path, sidelength=None):
     return img
 
 
-def load_depth(path, sidelength=None):
-    img = cv2.imread(path, cv2.IMREAD_UNCHANGED).astype(np.float32)
-
-    if sidelength is not None:
-        img = cv2.resize(img, (sidelength, sidelength), interpolation=cv2.INTER_NEAREST)
-
-    img *= 1e-4
-
-    if len(img.shape) == 3:
-        img = img[:, :, :1]
-        img = img.transpose(2, 0, 1)
-    else:
-        img = img[None, :, :]
-    return img
-
-
-def load_pose(filename):
-    lines = open(filename).read().splitlines()
-    if len(lines) == 1:
-        pose = np.zeros((4, 4), dtype=np.float32)
-        for i in range(16):
-            pose[i // 4, i % 4] = lines[0].split(" ")[i]
-        return pose.squeeze()
-    else:
-        lines = [[x[0], x[1], x[2], x[3]] for x in (x.split(" ") for x in lines[:4])]
-        return np.asarray(lines).astype(np.float32).squeeze()
-
-
 def load_params(filename):
     lines = open(filename).read().splitlines()
 
@@ -126,37 +98,6 @@ def read_view_direction_rays(direction_file):
     img -= 40000
     img /= 10000
     return img
-
-
-def shapenet_train_test_split(shapenet_path, synset_id, name, csv_path):
-    '''
-
-    :param synset_id: synset ID as a string.
-    :param name:
-    :param csv_path:
-    :return:
-    '''
-    parsed_csv = pd.read_csv(filepath_or_buffer=csv_path)
-    synset_df = parsed_csv[parsed_csv['synsetId'] == int(synset_id)]
-
-    train = synset_df[synset_df['split'] == 'train']
-    val = synset_df[synset_df['split'] == 'val']
-    test = synset_df[synset_df['split'] == 'test']
-    print(len(train), len(val), len(test))
-
-    train_path, val_path, test_path = [os.path.join(shapenet_path, str(synset_id) + '_' + name + '_' + x)
-                                       for x in ['train', 'val', 'test']]
-    cond_mkdir(train_path)
-    cond_mkdir(val_path)
-    cond_mkdir(test_path)
-
-    for split_df, trgt_path in zip([train, val, test], [train_path, val_path, test_path]):
-        for row_no, row in split_df.iterrows():
-            try:
-                shutil.copytree(os.path.join(shapenet_path, str(synset_id), str(row.modelId)),
-                                os.path.join(shapenet_path, trgt_path, str(row.modelId)))
-            except FileNotFoundError:
-                print("%s does not exist" % str(row.modelId))
 
 
 def transform_viewpoint(v):
