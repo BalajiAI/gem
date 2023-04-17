@@ -3,7 +3,6 @@ import matplotlib as mpl
 mpl.use('Agg')
 
 import utils
-from torchaudio.transforms import InverseMelScale
 
 import pickle
 import csv
@@ -200,7 +199,7 @@ def summarize_latents(writer, model, model_output, total_steps, prefix="train_",
     # patch needed only if env has tensorflow
     # help from: https://github.com/pytorch/pytorch/issues/47139
     try:
-        import tensorflow as tf
+        #import tensorflow as tf
         import tensorboard as tb
         tf.io.gfile = tb.compat.tensorflow_stub.io.gfile
     except ImportError as e:
@@ -326,108 +325,6 @@ def celebagan(model, model_input, gt, model_output, writer, total_steps, prefix=
 
     min_max_summary(prefix + 'model_out_min_max', model_output['model_out'], writer, total_steps)
 
-def audio(model, model_input, gt, model_output, writer, total_steps, prefix='train_', save_latents=True, audiovisual=False):
-    # import tensorflow as tf # NOTE: added here to avoid breaking other code if not included in env
-    import torchaudio
-
-    device = "cpu"
-
-    gt_wav = torch.squeeze(gt['wav'][:, :, 0], axis=-1)
-
-    # Spectograms always have the same size
-    if gt_wav.size(-1) !=  200*41:
-        return
-
-    gt_wav = gt_wav.to(device)
-    pred_wav = torch.squeeze(model_output['model_out'][:, :, 0], axis=-1)
-    data = np.load("instrument.npz")
-
-    mean = torch.Tensor(data['mean'][:-1]).to(device)
-    std = torch.Tensor(data['std'][:-1]).to(device)
-
-    # if len(gt_wav.size()) == 2:
-    #     pred_wav = pred_wav.unsqueeze(1)
-    #     gt_wav = gt_wav.unsqueeze(1)
-    # else:
-    #     pred_wav = pred_wav.permute(0, 2, 1).contiguous()
-    #     gt_wav = gt_wav.permute(0, 2, 1).contiguous()
-
-    pred_wav = pred_wav.to(device)
-
-    print("gt shape: ", gt_wav.shape, " pred shape: ", pred_wav.shape)
-
-    # add spectrogram
-    gt_spectrogram = gt_wav.view(200, 41)
-    pred_spectrogram = pred_wav.view(200, 41)
-
-    gt_spectrogram = gt_spectrogram * 3 * std[:, None] + mean[:, None]
-    pred_spectrogram = pred_spectrogram * 3 * std[:, None] + mean[:, None]
-
-    gt_spectrogram = torch.exp(gt_spectrogram)
-    pred_spectrogram = torch.exp(pred_spectrogram)
-
-    gt_spectrogram = torch.cat([gt_spectrogram, torch.zeros_like(gt_spectrogram[-1:, :])], dim=0)
-    pred_spectrogram = torch.cat([pred_spectrogram, torch.zeros_like(pred_spectrogram[-1:, :])], dim=0)
-
-    with torch.enable_grad():
-        gt_wav = torchaudio.transforms.GriffinLim()(gt_spectrogram)[None, :]
-        pred_wav = torchaudio.transforms.GriffinLim()(pred_spectrogram.detach())[None, :]
-
-    # gt_spectrogram = torchaudio.transforms.Spectrogram()(gt_wav)
-    # pred_wav = pred_wav.view(*gt_wav.size())
-    # pred_spectrogram = torchaudio.transforms.Spectrogram()(pred_wav)
-
-    print("gt shape: ", gt_spectrogram.shape, " pred shape: ", pred_spectrogram.shape)
-
-    output_vs_gt = torch.cat((gt_spectrogram, pred_spectrogram), dim=-1)
-    writer.add_image(prefix + 'gt_vs_pred_spec', make_grid(output_vs_gt, scale_each=False, normalize=False),#, cmap="plasma"),
-                     global_step=total_steps)
-
-    # add playable audio sample (k per batch concatenated)
-    num_save_per_batch = 5
-    gt_audio_subset, elmts = utils.stitch_audio_subset(gt_wav, num_sample=num_save_per_batch, elmts=None)
-    pred_audio_subset, _ = utils.stitch_audio_subset(pred_wav, elmts=elmts) # use same rand idcs as gt for predictions
-    sample_rate = gt['rate'][0].cpu().numpy()
-
-    gt_audio_subset = gt_audio_subset.squeeze()
-    writer.add_audio(prefix + 'gt_audio', gt_audio_subset, sample_rate=int(sample_rate),global_step=total_steps)
-    # handle nan - update! (should not need to do this...?)
-    print("pred subset: ", pred_audio_subset)
-    pred_audio_subset[torch.isnan(pred_audio_subset)] = 0.0
-
-    pred_audio_subset = pred_audio_subset.squeeze()
-    writer.add_audio(prefix + 'pred_audio', pred_audio_subset, sample_rate=int(sample_rate),global_step=total_steps)
-
-    if prefix == "train_" and save_latents: summarize_latents(writer, model, model_output, total_steps, prefix, n_iter_step=10000,add_statistics=True)
-
-    min_max_summary(prefix + 'model_out_min_max_wav', model_output['model_out'], writer, total_steps)
-    min_max_summary(prefix + 'gt_min_max_wav', gt['wav'], writer, total_steps)
-    min_max_summary(prefix + 'coords_min_max_wav', gt['x'], writer, total_steps)
-
-    if prefix != "train_" and (not audiovisual):
-        model_input_mix = {}
-        model_input_mix['context'] = {}
-        model_input_mix['context']['idx'] = model_input['context']['idx'][:1, :]
-        model_input_mix['context']['x'] = model_input['context']['x'][0]
-
-        if 'audio_coord' in model_input_mix['context']:
-            model_input_mix['context']['audio_coord'] = model_input['context']['audio_coord'][0]
-
-        model_output = model(model_input_mix, mix_sample=True, render=True)
-
-        if 'num_pixels' in gt:
-            num_pixels = int(gt["num_pixels"].cpu().numpy()[0])
-            pred_wav = torch.squeeze(model_output['model_out'][1][:, :, 0], axis=-1).unsqueeze(1)
-            pred_wav = pred_wav.to(device)
-        else:
-            pred_wav = torch.squeeze(model_output['model_out'], axis=-1).unsqueeze(1)
-            pred_wav = pred_wav.to(device)
-
-        pred_audio_subset, _ = utils.stitch_audio_subset(pred_wav, elmts=None) # use same rand idcs as gt for predictions
-
-        writer.add_audio(prefix + 'audio_interpolate', pred_audio_subset, sample_rate=int(sample_rate),global_step=total_steps)
-        writer.add_histogram(prefix + '_dist_histogram', model_output['dist_hist'], total_steps)
-
 
 def imnet(model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
     coords = model_input['context']['x']
@@ -436,85 +333,6 @@ def imnet(model, model_input, gt, model_output, writer, total_steps, prefix='tra
 
 def film(model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
     images(model, model_input, gt, model_output, writer, total_steps, prefix)
-
-# def audio_visual(model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
-#     # create different model_input and model_output to feed to audio/img summaries separately
-#
-#     import torchaudio
-#
-#     print("model input: ", model_input.keys(), model_input["context"].keys(), model_input["query"].keys())
-#     coords = model_input['context']['x']
-#     if coords.size(0) ==  1: # only do for validation
-#         num_pixels = int(gt["num_pixels"].cpu().numpy()[0])
-#
-#         model_output = model(model_input, mix_sample=True, render=True)
-#         writer.add_histogram(prefix + '_dist_histogram', model_output['dist_hist'], total_steps)
-#         # get rgb
-#         sidelen = int(num_pixels**0.5)
-#         # rgb = model_output["model_out"][:,:num_pixels, :-1].view(model_output["model_out"].shape(0), sidelen, sidelen, 1).permute(0, 3, 1, 2)
-#         rgb = model_output["model_out"][:,:num_pixels, :-1].view(3, sidelen, sidelen, 1).permute(0, 3, 1, 2)
-#         writer.add_image(prefix + '_latent_interpolate_rgb', make_grid(rgb, scale_each=False, normalize=True),
-#                          global_step=total_steps)
-#         # get spectrograms + waveforms
-#         pred_wav = torch.squeeze(model_output["model_out"][:, num_pixels:, -1], axis=-1).unsqueeze(1).to("cpu")
-#         pred_spec = torchaudio.transforms.Spectrogram()(pred_wav)
-#         writer.add_image(prefix + '_latent_interpolate_spec', make_grid(pred_spec, scale_each=False, normalize=False),
-#                          global_step=total_steps)
-#         pred_audio_subset, _ = utils.stitch_audio_subset(pred_wav, num_sample=-1) # sample all
-#         sample_rate = gt['rate'][0].cpu().numpy()
-#         writer.add_audio(prefix + '_latent_interpolate_wav', pred_audio_subset, sample_rate=int(sample_rate),
-#                          global_step=total_steps)
-#
-#     # num_pixels = int(gt["num_pixels"].cpu().numpy()[0])
-#     # audio_output = {"model_out": model_output["model_out"][:,num_pixels:,-1],"representation": model_output["representation"]}
-#     #
-#     # print("num pixels: ", num_pixels, " model out shape: ", model_output["model_out"].shape)
-#     #
-#     # audio(model, model_input, gt, audio_output, writer, total_steps, prefix,summarize_latents=False)
-#     # pred_img = model_output["model_out"][:,:num_pixels, :-1]#.unsqueeze(-1)
-#     # img_output = {"model_out": pred_img, "rgb": pred_img, "representation": model_output["representation"]}
-#     # img_input = {"context": {"x": model_input["context"]["x"][:, :num_pixels, :-1],"y": gt["rgb"], "mask": gt['mask'][:,:num_pixels,:]}}
-#     # images(model, img_input, gt, img_output, writer, total_steps, prefix)
-
-def audio_visual(model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
-    # create different model_input and model_output to feed to audio/img summaries separately
-    # num_pixels = int(gt["num_pixels"].cpu().numpy()[0])
-    audio_output = {"model_out": model_output["model_out"][1],"representation": model_output["representation"]}
-
-    audio(model, model_input, gt, audio_output, writer, total_steps, prefix,save_latents=False, audiovisual=True)
-    pred_img = model_output["model_out"][0]#.unsqueeze(-1)
-    img_output = {"model_out": pred_img, "rgb": pred_img, "representation": model_output["representation"]}
-    img_input = {"context": {"x": model_input["context"]["x"],"y": gt["rgb"], "mask": gt['mask'], "idx": model_input["context"]["idx"]}}
-    images(model, img_input, gt, img_output, writer, total_steps, prefix)
-
-def audio_visual_gan(model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
-
-    import torchaudio
-
-    # audio data
-    num_pixels = int(gt["num_pixels"].cpu().numpy()[0])
-    audio_output = model_output['model_out'][:, num_pixels:, -1]
-    pred_wav = torch.squeeze(audio_output, axis=-1).unsqueeze(1)
-    pred_wav = pred_wav.to("cpu")
-    print("pred wav shape: ", pred_wav.shape)
-    pred_spectrogram = torchaudio.transforms.Spectrogram()(pred_wav)
-    writer.add_image(prefix + 'pred_spec', make_grid(pred_spectrogram, scale_each=False, normalize=False),#, cmap="plasma"),
-                     global_step=total_steps)
-    # add playable audio sample (k per batch concatenated)
-    num_save_per_batch = 5
-    pred_audio_subset, _ = utils.stitch_audio_subset(pred_wav, num_sample=num_save_per_batch)
-    sample_rate = gt['rate'][0].cpu().numpy()
-    writer.add_audio(prefix + 'pred_audio', pred_audio_subset, sample_rate=int(sample_rate),global_step=total_steps)
-    min_max_summary(prefix + 'model_out_min_max_wav', audio_output, writer, total_steps)
-
-    # img data
-    img_output = model_output["model_out"][:, :num_pixels, :-1]
-    pred_img = utils.lin2img(img_output)
-    print("pred img shape: ", pred_img.shape)
-    writer.add_image(prefix + 'pred_img', make_grid(pred_img, scale_each=False, normalize=True),
-                     global_step=total_steps)
-    min_max_summary(prefix + 'model_out_min_max', img_output, writer, total_steps)
-
 
 
 def variational(model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
@@ -648,36 +466,6 @@ def normalize_rgb_signal(signal):
     signal /= 2.
     signal = torch.clamp(signal, 0., 1.)
     return signal
-
-
-class VideoSummarizer():
-    def __init__(self, num_frames, sidelength):
-        self.num_frames = num_frames
-        self.sidelength = sidelength
-
-    def __call__(self, model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
-        gt_video = utils.lin2video(gt['video_flat'], self.num_frames, self.sidelength)
-        gt_mgrid = gt['dense_coords']
-
-        with torch.no_grad():
-            model_input['context'] = get_single_batch_item_from_dict(model_input['context'], 0, squeeze=False)
-            params = get_single_batch_item_from_dict(model_output['fast_params'], 0, squeeze=False)
-            query_x = gt_mgrid[:1, ...]
-
-            sample_model_out = model.forward_with_params(query_x, params)
-            pred_video = utils.lin2video(sample_model_out, self.num_frames, self.sidelength)
-
-        # Videos have shape (batch, frames, height, width, channels)
-        gt_video = gt_video.permute(0, 1, -1, 2, 3)[:1, ...]
-        pred_video = pred_video.permute(0, 1, -1, 2, 3)
-
-        output_vs_gt = torch.cat((gt_video, pred_video), dim=-1)
-        output_vs_gt = normalize_rgb_signal(output_vs_gt)
-        writer.add_video(prefix + 'gt_video', output_vs_gt, global_step=total_steps)
-
-        min_max_summary(prefix + 'model_out_min_max', model_output['model_out'], writer, total_steps)
-        min_max_summary(prefix + 'gt_min_max', gt['video_flat'], writer, total_steps)
-        min_max_summary(prefix + 'coords_min_max', gt['x'], writer, total_steps)
 
 
 def min_max_summary(name, tensor, writer, total_steps):
