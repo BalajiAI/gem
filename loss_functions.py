@@ -21,48 +21,6 @@ def occupancy(prediction, gt, mask=None):
     loss_occ = torch.log(prediction['model_out'] + 1e-5) * gt['occupancy'] + (1 - gt['occupancy']) * torch.log(1 - prediction['model_out'] + 1e-5)
     return {'occupancy': (-loss_occ).mean()}
 
-def audio_L1(model_output, gt, mask=None):
-    mask = torch.squeeze(gt['mask'])
-    pred_wav = torch.squeeze(model_output['model_out'])
-    gt_wav = torch.squeeze(gt['wav'])
-
-    loss = torch.sum(mask*torch.abs(pred_wav - gt_wav)) / torch.sum(mask)
-    return {"audio_loss": loss}
-
-def audio_mse(model_output, gt, mask=None):
-    mask = torch.squeeze(gt['mask'])
-    pred_wav = torch.squeeze(model_output['model_out'])
-    gt_wav = torch.squeeze(gt['wav'])
-
-    loss = torch.sum(mask*(pred_wav - gt_wav)**2) / torch.sum(mask)
-    return {"audio_loss": loss}
-
-def audio_mse_linear(model_output, gt, mask=None):
-    mask = torch.squeeze(gt['mask'])
-    pred_wav = torch.squeeze(model_output['model_out'])
-    gt_wav = torch.squeeze(gt['wav'])
-
-    loss = torch.sum(mask*(pred_wav - gt_wav)**2) / torch.sum(mask)
-
-    pred_wav = torch.squeeze(model_output['model_out_linear'])
-    linear_loss = torch.sum(mask * (pred_wav - gt_wav) ** 2) / torch.sum(mask)
-
-    latents = model_output['latents']
-    idx = gt['idx']
-    idx_other = gt['idx_other']
-
-    latents_i = latents(idx)
-    latents_j = latents(idx_other)
-
-    mse = gt['mse']
-
-    dist = (latents_i - latents_j).pow(2).mean(dim=-1)
-    dist = dist[:, 0]
-
-    dist_norm = (dist) / dist.std()
-    mse_norm = (mse)  / mse.std()
-
-    return {"audio_loss": loss, "audio_linear_loss": linear_loss, 'mds_loss': (dist_norm - mse_norm).pow(2).mean()}
 
 def inner_maml_mse_subset(prediction, gt, mask=None):
     gt_ch = gt.shape[-1]
@@ -216,121 +174,6 @@ def image_mse_spectral(model_output, gt, mask=None):
     eig_loss = torch.abs(s - 1).mean()
 
     return {'img_loss': loss.mean(), 'eig_loss': eig_loss}
-
-
-def audio_visual_mse(model_output, gt, mask=None):
-    # decompose audio and visual loss
-    losses = {}
-
-    pred_rgb, pred_wav = model_output['model_out']
-    gt_wav = gt['wav'].squeeze(axis=-1)
-
-    pred_wav = pred_wav.squeeze()
-    losses["audio_loss"] = ((pred_wav - gt_wav)**2).mean()
-
-    loss =  (pred_rgb.cuda() - gt['rgb'].cuda()) ** 2
-    losses['img_loss'] = loss.mean()
-
-    return losses
-
-def audio_visual_mse_image_only(model_output, gt, mask=None):
-    # decompose audio and visual loss
-    losses = {}
-
-    pred_rgb, pred_wav = model_output['model_out']
-    gt_wav = gt['wav'].squeeze(axis=-1)
-
-    loss =  (pred_rgb.cuda() - gt['rgb'].cuda()) ** 2
-    losses['img_loss'] = loss.mean()
-
-    return losses
-
-
-def audio_visual_mse_audio_only(model_output, gt, mask=None):
-    # decompose audio and visual loss
-    losses = {}
-
-    pred_rgb, pred_wav = model_output['model_out']
-    gt_wav = gt['wav'].squeeze(axis=-1)
-
-    pred_wav = pred_wav.squeeze()
-    losses["audio_loss"] = ((pred_wav - gt_wav)**2).mean()
-
-    return losses
-
-
-def audio_visual_mse_linear(model_output, gt, mask=None):
-    # decompose audio and visual loss
-    losses = {}
-
-    pred_rgb, pred_wav = model_output['model_out']
-    gt_wav = gt['wav'].squeeze(axis=-1)
-
-    pred_wav = pred_wav.squeeze()
-    losses["audio_loss"] = ((pred_wav - gt_wav)**2).mean()
-
-    loss =  (pred_rgb.cuda() - gt['rgb'].cuda()) ** 2
-    losses['img_loss'] = loss.mean()
-
-    pred_rgb, pred_wav = model_output['model_out_linear']
-    pred_wav = pred_wav.squeeze()
-    gt_wav = gt['wav'].squeeze(axis=-1)
-    losses["audio_linear_loss"] = ((pred_wav - gt_wav)**2).mean()
-
-    loss = ((pred_rgb.cuda() - gt['rgb'].cuda()) ** 2)
-    losses["img_linear_loss"] = loss.mean()
-
-    weight = model_output['weights']
-    inv_weight = torch.clamp(-weight, 0, 1000)
-    loss_weight = inv_weight.mean()
-    losses['loss_weight'] = loss_weight
-
-    latents = model_output['latents']
-    idx = gt['idx']
-    idx_other = gt['idx_other']
-
-    latents_i = latents(idx)
-    latents_j = latents(idx_other)
-
-    mse = gt['mse']
-
-    dist = (latents_i - latents_j).pow(2).mean(dim=-1)
-    dist = dist[:, 0]
-
-    dist_norm = (dist) * model_output['scale_factor'].squeeze()
-    mse_norm = (mse)
-
-    losses['mds_loss'] = torch.abs(dist_norm - mse_norm).mean()
-
-    z = model_output['z_orig']
-    # l2_loss = torch.norm(z, dim=-1, p=2) * 1e-1
-
-    # losses['l2_loss'] = l2_loss
-
-    return losses
-
-
-def audio_visual_mse_linear_image_only(model_output, gt, mask=None):
-    # decompose audio and visual loss
-    losses = {}
-
-    pred_rgb, pred_wav = model_output['model_out']
-    loss =  (pred_rgb.cuda() - gt['rgb'].cuda()) ** 2
-    losses['img_loss'] = loss.mean()
-
-    return losses
-
-def audio_visual_mse_linear_audio_only(model_output, gt, mask=None):
-    # decompose audio and visual loss
-    losses = {}
-
-    pred_rgb, pred_wav = model_output['model_out']
-    gt_wav = gt['wav'].squeeze(axis=-1)
-
-    pred_wav = pred_wav.squeeze()
-    losses["audio_loss"] = ((pred_wav - gt_wav)**2).mean() * 1000
-
-    return losses
 
 
 def image_mse_grad_penalty(model_output, gt, mask=None):
@@ -490,25 +333,6 @@ class ImageSemantic():
         # return {'img_loss': img_loss, "semantic_loss": sem_loss, 'maml_loss':maml_loss}
 
 
-def inner_maml_mse_segmentation(prediction, gt, mask=None):
-    prediction = prediction[:, :, :3]
-    if mask is None:
-        loss = ((prediction - gt) ** 2)
-    else:
-        loss = (mask.cuda() * (prediction - gt) ** 2)
-    return loss.sum(0).mean()
-
-
-def outer_srns_mse(model_out, gt):
-    losses = {}
-    trgt_shape = gt['y'].shape
-    rgb = model_out['model_out'].cuda().view(trgt_shape)
-
-    losses['img_loss'] = ((rgb - gt['y']) ** 2).mean()
-    losses['depth_loss'] = ((model_out['query_ego_out']['depth'] * (model_out['query_ego_out']['depth']<0).float())**2).mean() * 1e4
-    return losses
-
-
 def inner_gon(prediction, gt, mask=None):
     # UPDATE!!
     if mask is None:
@@ -582,32 +406,6 @@ def val_image_semantic(model_output, gt, mask=None):
 
     return {'img_loss': img_val_loss, "semantic_loss": sem_val_loss}
 
-
-def depth_mse(model_output, gt, mask=None):
-    pred_depth = model_output['model_out'][:, :, -1:]
-    gt_depth = gt['y'][:, :, -1:]
-    if mask is None:
-        loss = ((pred_depth.cuda() - gt_depth.cuda()) ** 2)
-    else:
-        loss = (mask.cuda() * (pred_depth.cuda() - gt_depth.cuda()) ** 2)
-
-    return {'img_loss': loss.mean()}
-
-def val_depth_mse(model_output, gt, mask=None):
-    model_out =  model_output['model_out'][:, :, -1:].cpu().numpy()
-    gt = gt['y'][:, :, -1:].cpu().numpy()
-
-    model_out += 1.
-    model_out /= 2.
-    model_out = np.clip(model_out, 0., 1.)
-
-    gt += 1.
-    gt /= 2.
-    gt = np.clip(gt, 0., 1.)
-
-    val_loss = np.mean((model_out - gt)**2)
-
-    return {'img_loss': val_loss}
 
 def latent_loss(model_output):
     return torch.mean(model_output['latent_vec'] ** 2)
