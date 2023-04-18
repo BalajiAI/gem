@@ -11,8 +11,6 @@ from multiprocessing.pool import Pool
 import random
 import pickle as pck
 from glob import glob
-import torchaudio
-from torchaudio.transforms import MelSpectrogram, Spectrogram
 import pandas as pd
 import utils
 import pickle
